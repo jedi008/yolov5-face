@@ -254,15 +254,25 @@ def show_results(img, xywh, conf, landmarks, class_num):
     return img
 
 
-def detect_one(model, image_path, device):
+def detect_one_img(model, image_path, device):
+    orgimg = cv2.imread(image_path)  # BGR
+
+    detect_one_frame(model, orgimg, device)
+
+    #cv2.imwrite('jedi-result.jpg', orgimg)
+    cv2.imshow('jedi-result.jpg', orgimg)
+    cv2.waitKey(0)
+
+
+
+def detect_one_frame(model, orgimg, device):
     # Load model
     img_size = 800
     conf_thres = 0.3
     iou_thres = 0.5
 
-    orgimg = cv2.imread(image_path)  # BGR
     img0 = copy.deepcopy(orgimg)
-    assert orgimg is not None, 'Image Not Found ' + image_path
+    assert orgimg is not None, 'Image Is None'
     h0, w0 = orgimg.shape[:2]  # orig hw
     r = img_size / max(h0, w0)  # resize image to img_size
     if r != 1:  # always resize down, only resize up if training with augmentation
@@ -271,15 +281,9 @@ def detect_one(model, image_path, device):
 
     imgsz = check_img_size(img_size, s=model.stride.max())  # check img_size
 
-    print("step===================================1, imgsz: ",imgsz)
-
     img = letterbox(img0, new_shape=imgsz)[0]
     # Convert
     img = img[:, :, ::-1].transpose(2, 0, 1).copy()  # BGR to RGB, to 3x416x416
-    print("img: ",img.shape)
-
-    # Run inference
-    t0 = time.time()
 
     img = torch.from_numpy(img).to(device)
     img = img.float()  # uint8 to fp16/32
@@ -287,15 +291,10 @@ def detect_one(model, image_path, device):
     if img.ndimension() == 3:
         img = img.unsqueeze(0)
 
-    # Inference
-    t1 = time_synchronized()
     pred = model(img)[0]
 
     # Apply NMS
     pred = non_max_suppression_face(pred, conf_thres, iou_thres)
-
-    print('img.shape: ', img.shape)
-    print('orgimg.shape: ', orgimg.shape)
 
     # Process detections
     for i, det in enumerate(pred):  # detections per image
@@ -317,14 +316,30 @@ def detect_one(model, image_path, device):
                 landmarks = (det[j, 5:15].view(1, 10) / gn_lks).view(-1).tolist()
                 class_num = det[j, 15].cpu().numpy()
                 orgimg = show_results(orgimg, xywh, conf, landmarks, class_num)
-
-    cv2.imwrite('jedi-result.jpg', orgimg)
-    cv2.imshow('jedi-result.jpg', orgimg)
-    cv2.waitKey(0)
+    
+    return orgimg
 
 
+def detect_VideoCapture(cap, model, device):
+    while cap.isOpened():
+        #从摄像头读视频帧
+        ret, frame = cap.read()
 
-#def detect_one(model, image_path, device):
+        if ret == True:
+            # Run inference
+            t0 = time.time()
+            img = detect_one_frame(model, frame, device)
+            # Inference
+            t1 = time_synchronized()
+            print("one frame use time: ",t1 - t0)
+
+            cv2.imshow("VideoCapture", img)
+            
+            #等待键盘事件，如果为q，退出
+            key = cv2.waitKey(1)
+            if(key & 0xFF == ord('q')):
+                cv2.destroyAllWindows()
+                break
 
 
 
@@ -336,5 +351,18 @@ if __name__ == '__main__':
     image_path = 'data/images/cocotest.jpg'
 
     model = torch.load(weights_path, map_location=device)['model']
+    
+    
     #print(model)
-    detect_one(model, image_path, device)
+    #检测图片
+    detect_one_img(model, image_path, device)
+
+
+    #获取视频设备/从视频文件中读取视频帧
+    cap = cv2.VideoCapture(0)
+
+    #检测视频
+    detect_VideoCapture(cap, model, device)
+    
+    #释放VideoCapture
+    cap.release()   
